@@ -47,6 +47,44 @@ export type Database = {
           },
         ]
       }
+      uploaded_photos: {
+        Row: {
+          created_at: string
+          extracted_data: Json | null
+          file_name: string
+          file_size: number | null
+          id: string
+          image_url: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          extracted_data?: Json | null
+          file_name: string
+          file_size?: number | null
+          id?: string
+          image_url: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          extracted_data?: Json | null
+          file_name?: string
+          file_size?: number | null
+          id?: string
+          image_url?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "uploaded_photos_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       users: {
         Row: {
           created_at: string | null
@@ -64,6 +102,44 @@ export type Database = {
           id?: string
         }
         Relationships: []
+      }
+      voice_recordings: {
+        Row: {
+          audio_url: string
+          created_at: string
+          duration: number | null
+          file_size: number | null
+          id: string
+          transcription: string | null
+          user_id: string | null
+        }
+        Insert: {
+          audio_url: string
+          created_at?: string
+          duration?: number | null
+          file_size?: number | null
+          id?: string
+          transcription?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          audio_url?: string
+          created_at?: string
+          duration?: number | null
+          file_size?: number | null
+          id?: string
+          transcription?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "voice_recordings_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

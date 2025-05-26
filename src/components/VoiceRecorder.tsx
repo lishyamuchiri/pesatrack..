@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Mic, MicOff, Play, Pause, Square, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 interface VoiceRecorderProps {
   isOpen: boolean;
@@ -15,8 +16,10 @@ const VoiceRecorder = ({ isOpen, onClose }: VoiceRecorderProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const [audioURL, setAudioURL] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const { toast } = useToast();
 
   const startRecording = async () => {
@@ -24,17 +27,20 @@ const VoiceRecorder = ({ isOpen, onClose }: VoiceRecorderProps) => {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
 
-      const chunks: Blob[] = [];
       mediaRecorder.ondataavailable = (event) => {
-        chunks.push(event.data);
+        audioChunksRef.current.push(event.data);
       };
 
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: "audio/wav" });
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(audioChunksRef.current, { type: "audio/wav" });
         const url = URL.createObjectURL(blob);
         setAudioURL(url);
         stream.getTracks().forEach((track) => track.stop());
+        
+        // Save to Supabase
+        await saveRecording(blob);
       };
 
       mediaRecorder.start();
@@ -56,10 +62,60 @@ const VoiceRecorder = ({ isOpen, onClose }: VoiceRecorderProps) => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+    }
+  };
+
+  const saveRecording = async (audioBlob: Blob) => {
+    setIsSaving(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        toast({
+          title: "Error",
+          description: "You must be logged in to save recordings",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Upload audio file to storage
+      const fileName = `recording_${Date.now()}.wav`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('voice-recordings')
+        .upload(fileName, audioBlob);
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('voice-recordings')
+        .getPublicUrl(fileName);
+
+      // Save record to database
+      const { error: dbError } = await supabase
+        .from('voice_recordings')
+        .insert({
+          user_id: user.id,
+          audio_url: publicUrl,
+          file_size: audioBlob.size,
+        });
+
+      if (dbError) throw dbError;
+
       toast({
-        title: "Recording stopped",
-        description: "Your voice note has been saved",
+        title: "Recording saved!",
+        description: "Your voice note has been saved successfully",
       });
+    } catch (error) {
+      console.error('Error saving recording:', error);
+      toast({
+        title: "Error",
+        description: "Failed to save recording",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -127,12 +183,18 @@ const VoiceRecorder = ({ isOpen, onClose }: VoiceRecorderProps) => {
                       ? "Recording... Tap to stop"
                       : "Tap to start recording"}
                   </p>
+                  {isSaving && (
+                    <p className="text-emerald-400 text-sm mt-2">
+                      Saving recording...
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex justify-center gap-4">
                   {!isRecording ? (
                     <Button
                       onClick={startRecording}
+                      disabled={isSaving}
                       className="bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700"
                     >
                       <Mic className="mr-2" size={16} />

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Camera, Upload, X, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 interface PhotoUploadProps {
   isOpen: boolean;
@@ -14,26 +15,82 @@ interface PhotoUploadProps {
 const PhotoUpload = ({ isOpen, onClose }: PhotoUploadProps) => {
   const [dragActive, setDragActive] = useState(false);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
-  const handleFile = (file: File) => {
+  const handleFile = async (file: File) => {
     if (file && file.type.startsWith("image/")) {
+      setIsUploading(true);
+      
       const reader = new FileReader();
       reader.onload = (e) => {
         setUploadedImage(e.target?.result as string);
-        toast({
-          title: "Photo uploaded successfully!",
-          description: "Your receipt has been processed",
-        });
       };
       reader.readAsDataURL(file);
+
+      await savePhoto(file);
     } else {
       toast({
         title: "Invalid file type",
         description: "Please upload an image file",
         variant: "destructive",
       });
+    }
+  };
+
+  const savePhoto = async (file: File) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        toast({
+          title: "Error",
+          description: "You must be logged in to upload photos",
+          variant: "destructive",
+        });
+        setIsUploading(false);
+        return;
+      }
+
+      // Upload image file to storage
+      const fileName = `photo_${Date.now()}_${file.name}`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('photos')
+        .upload(fileName, file);
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('photos')
+        .getPublicUrl(fileName);
+
+      // Save record to database
+      const { error: dbError } = await supabase
+        .from('uploaded_photos')
+        .insert({
+          user_id: user.id,
+          image_url: publicUrl,
+          file_name: file.name,
+          file_size: file.size,
+        });
+
+      if (dbError) throw dbError;
+
+      toast({
+        title: "Photo uploaded successfully!",
+        description: "Your receipt has been saved",
+      });
+    } catch (error) {
+      console.error('Error saving photo:', error);
+      toast({
+        title: "Error",
+        description: "Failed to upload photo",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -66,7 +123,9 @@ const PhotoUpload = ({ isOpen, onClose }: PhotoUploadProps) => {
   };
 
   const triggerFileInput = () => {
-    fileInputRef.current?.click();
+    if (!isUploading) {
+      fileInputRef.current?.click();
+    }
   };
 
   return (
@@ -120,9 +179,9 @@ const PhotoUpload = ({ isOpen, onClose }: PhotoUploadProps) => {
                       dragActive
                         ? "border-emerald-400 bg-emerald-500/10"
                         : "border-white/30 hover:border-white/50 hover:bg-white/5"
-                    }`}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
+                    } ${isUploading ? "opacity-50 cursor-not-allowed" : ""}`}
+                    whileHover={!isUploading ? { scale: 1.02 } : {}}
+                    whileTap={!isUploading ? { scale: 0.98 } : {}}
                   >
                     <motion.div
                       animate={dragActive ? { scale: [1, 1.1, 1] } : {}}
@@ -132,10 +191,14 @@ const PhotoUpload = ({ isOpen, onClose }: PhotoUploadProps) => {
                       <Camera className="text-white" size={24} />
                     </motion.div>
                     <p className="text-white font-medium mb-2">
-                      {dragActive ? "Drop your image here" : "Upload Receipt Photo"}
+                      {isUploading
+                        ? "Uploading..."
+                        : dragActive
+                        ? "Drop your image here"
+                        : "Upload Receipt Photo"}
                     </p>
                     <p className="text-gray-400 text-sm">
-                      Drag and drop or click to browse
+                      {isUploading ? "Please wait..." : "Drag and drop or click to browse"}
                     </p>
                   </motion.div>
                 ) : (
@@ -157,11 +220,12 @@ const PhotoUpload = ({ isOpen, onClose }: PhotoUploadProps) => {
                     <div className="text-center">
                       <p className="text-white font-medium">Receipt uploaded!</p>
                       <p className="text-gray-400 text-sm">
-                        Processing for expense tracking...
+                        Saved to your account
                       </p>
                     </div>
                     <Button
                       onClick={triggerFileInput}
+                      disabled={isUploading}
                       variant="outline"
                       className="w-full bg-white/5 border-white/20 text-white hover:bg-white/10"
                     >
